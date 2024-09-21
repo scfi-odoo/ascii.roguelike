@@ -11,6 +11,9 @@ WIDTH = 20
 HEIGHT = 10
 player_health = 100
 max_health = 100
+player_mana = 50
+max_mana = 50
+fireball_mana_cost = 20
 level = 1
 player_x = WIDTH // 2
 player_y = HEIGHT // 2
@@ -19,12 +22,13 @@ player_y = HEIGHT // 2
 enemies = []
 enemy_types = {'X': {'base_health': 10, 'damage': 5}, 'E': {'base_health': 20, 'damage': 10}}  # Scaling health
 fireballs = []  # To store fireballs in flight
+potions = []  # To store potion locations
 
 # Dungeon creation
 def create_dungeon():
     global dungeon, WIDTH, HEIGHT
     dungeon = [['.' for _ in range(WIDTH)] for _ in range(HEIGHT)]
-
+    
     # Randomly place walls
     for i in range(int(WIDTH * HEIGHT * 0.2)):  # 20% walls
         x = random.randint(0, WIDTH - 1)
@@ -77,6 +81,19 @@ def spawn_enemy(type_char):
         if dungeon[y][x] == '.' and (x != player_x or y != player_y):  # Avoid player position
             return {'x': x, 'y': y, 'type': type_char, 'health': enemy_types[type_char]['base_health'] + level * 5}
 
+# Function to spawn potions randomly
+def spawn_potions():
+    global potions
+    potions = []
+    num_potions = random.randint(1, max(2, level // 3))  # Increase potion count as level increases
+    for _ in range(num_potions):
+        while True:
+            x = random.randint(0, WIDTH - 1)
+            y = random.randint(0, HEIGHT - 1)
+            if dungeon[y][x] == '.' and (x != player_x or y != player_y):
+                potions.append({'x': x, 'y': y})
+                break
+
 # Function to place enemies based on level
 def place_enemies():
     global enemies
@@ -86,11 +103,11 @@ def place_enemies():
     else:
         enemies.extend([spawn_enemy('X') for _ in range(level)])  # Scale enemies with level
 
-# Function to display the dungeon, enemies, player, and fireballs
+# Function to display the dungeon, enemies, player, fireballs, and potions
 def display_dungeon():
     os.system('clear')  # For Windows, use 'cls' instead of 'clear'
-
-    # Display health bar with color
+    
+    # Display health and mana bars with color
     health_percentage = player_health / max_health * 100
     if health_percentage >= 70:
         health_color = Fore.GREEN
@@ -98,19 +115,25 @@ def display_dungeon():
         health_color = Fore.YELLOW
     else:
         health_color = Fore.RED
-
+    
     health_bar = '[' + '#' * (player_health * 10 // max_health) + ' ' * (10 - (player_health * 10 // max_health)) + ']'
     print(f"Health: {health_color}{health_bar} {player_health}/{max_health}")
-
+    
+    mana_percentage = player_mana / max_mana * 100
+    mana_bar = '[' + '#' * (player_mana * 10 // max_mana) + ' ' * (10 - (player_mana * 10 // max_mana)) + ']'
+    print(f"Mana: {Fore.BLUE}{mana_bar} {player_mana}/{max_mana}")
+    
     for y in range(HEIGHT):
         for x in range(WIDTH):
             if x == player_x and y == player_y:
                 print(Fore.GREEN + Style.BRIGHT + '@', end='')  # Bold and green player
+            elif any(potion['x'] == x and potion['y'] == y for potion in potions):
+                print(Fore.CYAN + 'P', end='')  # Cyan potions
             else:
                 enemy_here = False
                 fireball_here = False
                 for enemy in enemies:
-                    if enemy['x'] == x and enemy['y'] == y:
+                    if enemy['x'] == x and enemy['y'] == y and enemy['health'] > 0:
                         print(Fore.RED + Style.BRIGHT + enemy['type'], end='')  # Bold and red enemies
                         enemy_here = True
                         break
@@ -138,39 +161,47 @@ def move_player(dx, dy):
 def move_enemies():
     global player_health
     for enemy in enemies[:]:  # Use a copy of the list to avoid modification errors
-        path = a_star_search((enemy['x'], enemy['y']), (player_x, player_y))
-        if path:  # If a path exists, move the enemy along the path
-            next_step = path[0]
-            enemy['x'], enemy['y'] = next_step
+        if enemy['health'] > 0:  # Only move enemies that are alive
+            path = a_star_search((enemy['x'], enemy['y']), (player_x, player_y))
+            if path:  # If a path exists, move the enemy along the path
+                next_step = path[0]
+                enemy['x'], enemy['y'] = next_step
 
-        # Check if the enemy has reached the player
-        if enemy['x'] == player_x and enemy['y'] == player_y:
-            print(f"Enemy {enemy['type']} attacks!")
-            player_health -= enemy_types[enemy['type']]['damage']
-            if player_health <= 0:
-                print("You have been killed by the enemy!")
-                return False  # End game
+            # Check if the enemy has reached the player
+            if enemy['x'] == player_x and enemy['y'] == player_y:
+                print(f"Enemy {enemy['type']} attacks!")
+                player_health -= enemy_types[enemy['type']]['damage']
+                print(f"Player health after attack: {player_health}")
+                if player_health <= 0:
+                    print("You have been killed by the enemy!")
+                    return False  # End game
     return True
 
 # Combat when the player moves into an enemy tile
 def check_for_combat():
     global player_health
     for enemy in enemies[:]:  # Use a copy of the list to allow removal
-        if player_x == enemy['x'] and player_y == enemy['y']:
+        if player_x == enemy['x'] and player_y == enemy['y'] and enemy['health'] > 0:
             print(f"Fighting enemy {enemy['type']}!")
             enemy['health'] -= 10 + level * 2  # Player deals damage, scaling with level
-            player_health -= enemy_types[enemy['type']]['damage']  # Enemy attacks back
-            print(f"Enemy {enemy['type']} health: {enemy['health']}")
+            print(f"Enemy {enemy['type']} health after hit: {enemy['health']}")
             if enemy['health'] <= 0:
                 print(f"Enemy {enemy['type']} has been defeated!")
-                enemies.remove(enemy)
+                enemies.remove(enemy)  # Remove enemy only when confirmed dead
+            else:
+                player_health -= enemy_types[enemy['type']]['damage']  # Enemy attacks back
+                print(f"Player health after combat: {player_health}")
             if player_health <= 0:
                 print("You have been killed!")
                 return False  # End the game if the player dies
 
 # Fireball combat
 def shoot_fireball(direction):
-    global fireballs
+    global fireballs, player_mana
+    if player_mana < fireball_mana_cost:
+        print("Not enough mana to cast fireball!")
+        return
+    player_mana -= fireball_mana_cost
     fireball_speed = 2  # Fireball moves 2 tiles per turn
     dx, dy = 0, 0
     if direction == 'w':  # Up
@@ -186,24 +217,25 @@ def shoot_fireball(direction):
     fireball_x, fireball_y = player_x + dx, player_y + dy
     fireballs.append({'x': fireball_x, 'y': fireball_y, 'dx': dx, 'dy': dy, 'speed': fireball_speed})
 
-# Move fireballs
+# Move fireballs and check collisions on every tile passed
 def move_fireballs():
     global fireballs
     for fireball in fireballs[:]:
         for _ in range(fireball['speed']):  # Fireball moves 2 tiles per turn
             fireball['x'] += fireball['dx']
             fireball['y'] += fireball['dy']
-
+            
             # Check for collision with walls
             if fireball['x'] < 0 or fireball['x'] >= WIDTH or fireball['y'] < 0 or fireball['y'] >= HEIGHT or dungeon[fireball['y']][fireball['x']] == '#':
                 fireballs.remove(fireball)
                 break
 
-            # Check for collision with enemies
+            # Check for collision with enemies on each tile it passes
             for enemy in enemies[:]:  # Iterate over a copy to allow removal
-                if fireball['x'] == enemy['x'] and fireball['y'] == enemy['y']:
+                if fireball['x'] == enemy['x'] and fireball['y'] == enemy['y'] and enemy['health'] > 0:
                     print(f"Fireball hit enemy {enemy['type']}!")
                     enemy['health'] -= 20 + level * 5  # Fireball damage increases with level
+                    print(f"Enemy {enemy['type']} health after fireball: {enemy['health']}")
                     if enemy['health'] <= 0:
                         print(f"Enemy {enemy['type']} has been defeated by fireball!")
                         enemies.remove(enemy)
@@ -212,22 +244,36 @@ def move_fireballs():
 
 # Level progression
 def next_level():
-    global WIDTH, HEIGHT, player_health, max_health, level, player_x, player_y
+    global WIDTH, HEIGHT, player_health, max_health, player_mana, max_mana, level, player_x, player_y
     level += 1
     WIDTH += 5
     HEIGHT += 5
     player_health = min(player_health + 40, max_health)  # Heal more as the level increases
+    player_mana = min(player_mana + 30, max_mana)  # Restore mana per level
     max_health += 10  # Increase max health per level
+    max_mana += 10  # Increase max mana per level
     player_x = WIDTH // 2
     player_y = HEIGHT // 2
     create_dungeon()
     place_enemies()
+    spawn_potions()
+
+# Handle potion collection
+def check_for_potions():
+    global player_health, player_mana
+    for potion in potions[:]:
+        if player_x == potion['x'] and player_y == potion['y']:
+            print("You found a potion! Restoring health and mana.")
+            player_health = min(player_health + 20, max_health)
+            player_mana = min(player_mana + 20, max_mana)
+            potions.remove(potion)
 
 # Game loop
 def game_loop():
     global player_health
     create_dungeon()
     place_enemies()
+    spawn_potions()
 
     while player_health > 0:
         display_dungeon()
@@ -251,6 +297,7 @@ def game_loop():
             break
 
         check_for_combat()
+        check_for_potions()
 
         # Move enemies after player
         if not move_enemies():
